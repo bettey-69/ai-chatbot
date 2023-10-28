@@ -1,163 +1,286 @@
 from chatbot import app
-from flask import render_template,flash, request
+from flask import Flask, render_template, request, url_for, flash, session, jsonify
 from chatbot.forms import chatbotform
-from chatbot.__init__ import model,words,classes,intents
-
+from chatbot.__init__ import model, words, classes, intents
+from werkzeug.utils import redirect
+from flask_mysqldb import MySQL
+import mysql.connector
+import re
+import pymysql
+from sklearn.metrics import accuracy_score
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
 import nltk
 import pickle
 import json
 import numpy as np
-from keras.models import Sequential,load_model
+from keras.models import Sequential, load_model
 import random
-from datetime import datetime
-import pytz
-import requests
-import os
-import billboard
-import time
-from pygame import mixer
-import COVID19Py
+import pandas as pd
+import hashlib
+from hashlib import md5
+
 
 from nltk.stem import WordNetLemmatizer
-lemmatizer=WordNetLemmatizer()
+lemmatizer = WordNetLemmatizer()
 
+from datetime import datetime
 
-#Predict
+def save_message_to_file(user_message, bot_response):
+    with open('chat_history.txt', 'a') as file:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        file.write(f"{timestamp} - User: {user_message}\n")
+        file.write(f"{timestamp} - Bot: {bot_response}\n")
+
+# Predict
 def clean_up(sentence):
-    sentence_words=nltk.word_tokenize(sentence)
-    sentence_words=[ lemmatizer.lemmatize(word.lower()) for word in sentence_words]
+    sentence_words = nltk.word_tokenize(sentence)
+    sentence_words = [lemmatizer.lemmatize(
+        word.lower()) for word in sentence_words]
     return sentence_words
 
-def create_bow(sentence,words):
-    sentence_words=clean_up(sentence)
-    bag=list(np.zeros(len(words)))
+
+def create_bow(sentence, words):
+    sentence_words = clean_up(sentence)
+    bag = list(np.zeros(len(words)))
 
     for s in sentence_words:
-        for i,w in enumerate(words):
+        for i, w in enumerate(words):
             if w == s:
                 bag[i] = 1
     return np.array(bag)
 
-def predict_class(sentence,model):
-    p=create_bow(sentence,words)
-    res=model.predict(np.array([p]))[0]
-    threshold=0.8
-    results=[[i,r] for i,r in enumerate(res) if r>threshold]
-    results.sort(key=lambda x: x[1],reverse=True)
-    return_list=[]
+
+def predict_class(sentence, model):
+    p = create_bow(sentence, words)
+    res = model.predict(np.array([p]))[0]
+    threshold = 0.8
+    results = [[i, r] for i, r in enumerate(res) if r > threshold]
+    results.sort(key=lambda x: x[1], reverse=True)
+    return_list = []
 
     for result in results:
-        return_list.append({'intent':classes[result[0]],'prob':str(result[1])})
+        return_list.append(
+            {'intent': classes[result[0]], 'prob': str(result[1])})
     return return_list
 
-def get_response(return_list,intents_json,text):
 
-    if len(return_list)==0:
-        tag='noanswer'
+def get_response(return_list, intents_json, text):
+
+    if len(return_list) == 0:
+        tag = 'noanswer'
     else:
-        tag=return_list[0]['intent']
-    if tag=='datetime':
-        x=''
-        tz = pytz.timezone('Asia/Kolkata')
-        dt=datetime.now(tz)
-        x+=str(dt.strftime("%A"))+' '
-        x+=str(dt.strftime("%d %B %Y"))+' '
-        x+=str(dt.strftime("%H:%M:%S"))
-        return x,'datetime'
+        tag = return_list[0]['intent']
 
+  
+    if tag == 'hospital_recommendation':
+            
+            response = "Sure, I can recommend some hospitals based on your preferences. Do you prefer private or public hospitals?"
+            response, tag
 
-
-    if tag=='weather':
-        x=''
-        api_key='987f44e8c16780be8c85e25a409ed07b'
-        base_url = "http://api.openweathermap.org/data/2.5/weather?"
-        # city_name = input("Enter city name : ")
-        city_name = text.split(':')[1].strip()
-        complete_url = base_url + "appid=" + api_key + "&q=" + city_name
-        response = requests.get(complete_url)
-        response=response.json()
-        pres_temp=round(response['main']['temp']-273,2)
-        feels_temp=round(response['main']['feels_like']-273,2)
-        cond=response['weather'][0]['main']
-        x+='Present temp.:'+str(pres_temp)+'C. Feels like:'+str(feels_temp)+'C. '+str(cond)
-        print(x)
-        return x,'weather'
-
-    if tag=='news':
-        main_url = " http://newsapi.org/v2/top-headlines?country=in&apiKey=bc88c2e1ddd440d1be2cb0788d027ae2"
-        open_news_page = requests.get(main_url).json()
-        article = open_news_page["articles"]
-        results = []
-        x=''
-        for ar in article:
-            results.append([ar["title"],ar["url"]])
-
-        for i in range(10):
-            x+=(str(i + 1))
-            x+='. '+str(results[i][0])
-            x+=(str(results[i][1]))
-            if i!=9:
-                x+='\n'
-
-        return x,'news'
-
-    if tag=='cricket':
-        c = Cricbuzz()
-        matches = c.matches()
-        for match in matches:
-            print(match['srs'],' ',match['mnum'],' ',match['status'])
-
-    if tag=='song':
-        chart=billboard.ChartData('hot-100')
-        x='The top 10 songs at the moment are: \n'
-        for i in range(10):
-            song=chart[i]
-            x+=str(i+1)+'. '+str(song.title)+'- '+str(song.artist)
-            if i!=9:
-                x+='\n'
-        return x,'songs'
-
-    if tag=='timer':
-        #mixer.init()
-        x=text.split(':')[1].strip()
-        time.sleep(float(x)*60)
-        #mixer.music.load('Handbell-ringing-sound-effect.mp3')
-        #mixer.music.play()
-        x='Timer ringing...'
-        return x,'timer'
-
-
-    if tag=='covid19':
-
-        covid19=COVID19Py.COVID19(data_source='jhu')
-        country=text.split(':')[1].strip()
-        x=''
-        if country.lower()=='world':
-            latest_world=covid19.getLatest()
-            x+='Confirmed Cases:'+str(latest_world['confirmed'])+' Deaths:'+str(latest_world['deaths'])
-            return x,'covid19'
+    if tag == 'private_hospital_recommendation':
+        # Fetch hospitals from database based on  ('%breast cancer%',))
+        
+        cur = mysql.cursor()
+        cur.execute(
+            "SELECT hname, rating, working_hour, severity_levels FROM facility WHERE hospital_type='private' AND severity_levels='High' ORDER BY rating DESC")
+        results = cur.fetchall()
+        if len(results) == 0:
+            response = 'Sorry, we could not find any private hospitals for breast cancer treatment.'
         else:
-            latest=covid19.getLocations()
-            latest_conf=[]
-            latest_deaths=[]
-            for i in range(len(latest)):
+            response = 'Here are some private hospitals that we recommend for breast cancer treatment:\n'
+            for result in results:
+                response += f'{result[0]} - {result[1]}\n'
+        return response, tag
+    if tag == 'public_hospital_recommendation':
+        
+            # Fetch hospitals from database based on rating
+        cur = mysql.cursor()
 
-                if latest[i]['country'].lower()== country.lower():
-                    latest_conf.append(latest[i]['latest']['confirmed'])
-                    latest_deaths.append(latest[i]['latest']['deaths'])
-            latest_conf=np.array(latest_conf)
-            latest_deaths=np.array(latest_deaths)
-            x+='Confirmed Cases:'+str(np.sum(latest_conf))+' Deaths:'+str(np.sum(latest_deaths))
-            return x,'covid19'
+        cur.execute(
+            "SELECT hname, rating, working_hour, severity_levels FROM facility WHERE hospital_type='public' AND severity_levels='High' ORDER BY rating DESC")
+        results = cur.fetchall()
+        if len(results) == 0:
+            response = 'Sorry, we could not find any public hospitals for breast cancer treatment.'
+        else:
+            response = 'Here are some public hospitals that we recommend for breast cancer treatment:\n'
+            for result in results:
+                response += f'{result[0]} - {result[1]}\n'
+        return response, tag
+    
+    
+    if tag == 'yes':
+        
+        data = pd.read_csv("C:/Users/HU/Desktop/Chatbot/chatbot_codes/breast_cancer_symptoms.csv")
+
+        # Modify the dataset based on the given parameters
+        data = data[["Lump in the breast", "Thickening or swelling in the breast", "Change in the size or shape of the breast", "Dimpling or puckering of the skin on the breast",
+            "Inverted nipple", "Redness or scaling on the breast or nipple", "Nipple discharge", "Swollen lymph nodes under the arm", "severity_level"]]
+
+        # Split the dataset into input features and target variable
+        X = data.drop("severity_level", axis=1)
+        y = data["severity_level"]
+
+        # Split the dataset into training and testing sets
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+        # Train a decision tree model on the training set
+        model = DecisionTreeClassifier()
+        model.fit(X_train, y_train)
+        #model.save('ourmodel.h5',weights2)
+        
+        # Evaluate the model on the testing set
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        print("Accuracy:", accuracy)
+        
+        symptoms = []
+        medical_attention = str()
+        for feature in X.columns:
+            value = input(f"{feature}: ")
+            symptoms.append(int(value))
+        symptom_data = pd.DataFrame([symptoms], columns=X.columns)
+        severity_levels = model.predict(symptom_data) 
+        if "High severity" in severity_levels:
+            medical_attention = "We recommend that you seek immediate medical attention based on your preference. Would you prefer a private hospital or a public hospital?"
+        elif "Medium severity" in severity_levels:
+            medical_attention = "We recommend that you schedule an appointment with your primary care physician."
+        else:
+            medical_attention = "We recommend that you monitor your symptoms and seek medical attention if they worsen."
+            
+        return str(severity_levels) + " " " "+ medical_attention, tag
+
+    
+    if tag == 'healthy lifestyle':
+            response = "Maintaining a healthy lifestyle is important for overall health and wellbeing. Some tips for a healthy lifestyle include eating a balanced diet, getting regular exercise, getting enough sleep, managing stress, and avoiding unhealthy habits such as smoking or excessive alcohol consumption. How would you like to improve your health?"
+            return response, tag
+
+    elif tag == 'diet':
+             response = "A healthy diet can help maintain a healthy weight and reduce the risk of cancer recurrence. Aim for a diet that is rich in fruits, vegetables, whole grains, and lean protein sources, and limit processed and red meats, sugary drinks, and high-fat food"
+             return response, tag 
+
+    elif tag == 'exercise':
+             response = " Regular physical activity can help improve overall health and reduce the risk of cancer recurrence. Aim for at least 150 minutes of moderate-intensity exercise per week, such as brisk walking, cycling, or swimming."
+             return response, 'exercise'
+
+    elif tag == 'sleep':
+             response = " Some strategies that may help improve sleep include: 1:Establishing a regular sleep schedule: Going to bed and waking up at the same time every day can help regulate the sleep-wake cycle.2:Creating a relaxing sleep environment: The sleep environment should be cool, dark, and quiet, and free from distractions such as electronic devices.3.Practicing relaxation techniques: Relaxation techniques such as deep breathing, meditation, or progressive muscle relaxation may help reduce stress and promote sleep.4:Avoiding caffeine and alcohol: Caffeine and alcohol can interfere with sleep, so it's best to avoid them in the hours leading up to bedtime.5:Engaging in regular physical activity: Regular exercise can help improve sleep quality, but it's important to avoid exercising too close to bedtime as it can interfere with sleep."
+             return response, 'sleep'
+
+    elif tag == 'stress':
+             response = "It's important to make time for relaxation and stress management. Here are some activities you might find helpful:Practicing mindfulness meditation or deep breathing exercises, Taking a yoga or tai chi class that focuses on relaxation, Engaging in a hobby or activity that you enjoy, such as reading or listening to music"
+             return response, 'stress'
+
+    elif tag == 'unhealthy habits':
+             response = "It's important to take small steps to change unhealthy habits over time. Here are some tips for breaking bad habits:Setting a specific goal for changing the habit, such as cutting back on smoking or drinking, Identifying triggers that lead to the habit and finding ways to avoid or cope with them, Enlisting the support of friends or family members who can help you stay on track"
+             return response, 'unhealthy habits'
+    
+
+    if tag == 'not feeling well':
+        
+        followup = 'Please answer the following question about your symptom using 0 for absence and 1 for presence: tell me if you would like to continue with okay or no'
+        return followup,tag
+    if tag == "vital_signs":
+       response = "Vital signs are measurements of the body's basic functions, including body temperature, blood pressure, pulse rate, and respiratory rate. Which vital sign do you want to measure?"
+       return response, tag
+
+    elif tag == "temperature":
+         response = "Do you have any measurement device to record vital signs?"
+         return response, tag
+
+    elif tag == "temperature_yes" or tag == "temperature_yes_device":
+        response = "Great! Let's start with the temperature. Measure the body temperature and enter the result.is that greater than 37.5 or less than 37.5"
+        return response, tag
+
+    elif tag == "vital_signs_temperature":
+         temperature = float(text)
+         if temperature > 37.5:
+             response = "According to your response, you have a fever."
+         else:
+             response = "You do not have a fever."
+             return response, 'vital_signs_temperature'
+
+    elif tag == "temperature_fever":
+         response = "According to your response, you have a fever."
+         return response, tag
+ 
+    elif tag == "temperature_no":
+         response = "To measure your body temperature, you can use a regular thermometer that you place under your tongue. Enter the response you see on the thermometer.is that greater than 37.5 or less than 37.5"
+         return response, tag
+
+    elif tag == "temperature_no_fever":
+         response = "According to your response, you do not have a fever."
+         return response, tag
+
+    elif tag == "temperature_no_device":
+        response = "To measure your body temperature, you can use a regular thermometer that you place under your tongue."
+        return response, tag
+
+    elif tag == "temperature_yes_device":
+         response = "Great! Let's start with the temperature. Measure the body temperature and enter the result.is it greather than 37.5 or below 37.5"
+         return response, tag
+    elif tag == "blood_pressure":
+         response = "Do you have any measurement device to record the vital sign?"
+         return response, tag
+
+    elif tag == "blood_pressure_device_yes":
+        response = "Great! Let's start with the blood pressure.Please enter the patient's systolic blood pressure and diastolic blood pressure. is it greater than or equals to 140 or 90"
+        return response, tag
+
+    elif tag == "blood_pressure_device_yes_result":
+        systolic = int(text.split()[0])
+        diastolic = int(text.split()[1])
+        response = ""
+        if systolic >= 140 or diastolic >= 90:
+           response = "It looks like your blood pressure is above normal. We recommend you seek medical attention."
+        elif systolic >= 120 or diastolic >= 80:
+           response = "Congrats! Your blood pressure is normal."
+        return response, tag
+
+    elif tag == "blood_pressure_device_no":
+         response = "If you do not have a blood pressure monitor, it may be difficult to measure your blood pressure accurately. One way is to check for symptoms that may indicate high or low blood pressure, such as feeling dizzy, lightheaded, or having a headache, which may be a sign of high blood pressure. If you feel weak or fatigued, it may be a sign of low blood pressure. Enter what you got down below to check if it's normal."
+         return response, tag
+
+    elif tag == "blood_pressure_no_device_result":
+        systolic = int(text.split()[0])
+        diastolic = int(text.split()[1])
+        if systolic >= 140 or diastolic >= 90:
+           response = "It looks like your blood pressure is above normal. We recommend you seek medical attention."
+        elif 120 <= systolic < 140 and 80 <= diastolic < 90:
+           response = "Congrats! Your blood pressure is normal."
+        else:
+           response = "We're sorry, we could not determine your blood pressure reading. Please try again."
+        return response, tag
 
 
-
+    elif tag =="respiratory_rate":
+          response = "OK, let's measure your respiratory rate. To measure your respiratory rate, you can count the number of breaths you take in 30 seconds and multiply by two.is the rate greater than 20 or less than 12"
+          return response, tag
+    elif tag == "respiratory_rate_result":
+         rate = int(text)
+         if rate > 20 or rate < 12:
+            response = "Your respiratory rate is outside of the normal range. It's important to consult with a healthcare provider."
+         else:
+             response = "Your respiratory rate looks good."
+         return response, tag
+    if tag == 'feedback':
+        feedback = text
+        feedback_dict = {"feedback": feedback}
+        with open("feedback.json", "a") as f:
+            json.dump(feedback_dict, f)
+            f.write(",\n")
+        return 'Thank you for the feedback',tag
+    
+    if tag == 'goodbye':
+        response = 'Thank you for using our chatbot! Please provide your feedback with rating of 1-5, 1 being very bad experience, 3 for neutral experience and 5 for very good experience:'
+        return response,tag
+         
     list_of_intents= intents_json['intents']
     for i in list_of_intents:
         if tag==i['tag'] :
             result= random.choice(i['responses'])
-    return result,tag
-
+            
+            return result,tag
 def response(text):
     return_list=predict_class(text,model)
     response,_=get_response(return_list,intents,text)
@@ -165,18 +288,223 @@ def response(text):
 
 
 
-@app.route('/',methods=['GET','POST'])
+#@app.route('/',methods=['GET','POST'])
 #@app.route('/home',methods=['GET','POST'])
-def yo():
-    return render_template('main.html')
+#def yo():
+    #return render_template('main.html')
+#app = Flask(__name__)
+app.secret_key = 'many random bytes'
 
+app.config['MYSQL_HOST'] = 'localhost'
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = ''
+app.config['MYSQL_DB'] = 'crud'
+
+mysql = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    password="",
+    database="crud"
+)
 @app.route('/chat',methods=['GET','POST'])
-#@app.route('/home',methods=['GET','POST'])
+@app.route('/home',methods=['GET','POST'])
 def home():
     return render_template('index.html')
+
+@app.route('/', methods =['GET', 'POST'])
+def login():
+    msg = ''
+
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        pwd =  hashlib.md5(password.encode()).hexdigest()
+        cursor = mysql.cursor()
+        cursor.execute("SELECT * FROM accounts WHERE username=%s AND password=%s", (username, pwd))
+        user = cursor.fetchone()
+        if user:
+            session['logged_in'] = True
+            session['username'] = username
+            session['role'] = user[7]  
+            if session['role'] == 'user':
+                return redirect(url_for('Main'))
+            elif session['role'] == 'admin':
+                return redirect(url_for('Admin'))
+        else:
+            return "Invalid login credentials. Please try again."
+    else:
+        return render_template('login.html')
+@app.route('/main')
+def Main():
+    if session.get('logged_in') and session['role'] == 'user':
+        return render_template('main.html')
+@app.route('/add', methods =['POST'])
+def add():
+    msg = ''
+    if request.method == 'POST':
+        if 'name' in request.form and 'birth_date' in request.form and 'gender' in request.form and 'weight' in request.form and 'medical_condition' in request.form:
+            name = request.form['name']
+            birth_date = request.form['birth_date']
+            gender = request.form['gender']
+            weight = request.form['weight']
+            medical_condition=request.form['medical_condition']
+            cur = mysql.cursor()
+            try:
+                cur.execute('INSERT INTO medical_detail (name, birth_date, gender, weight, medical_condition) VALUES (%s, %s, %s, %s,%s)', (name, birth_date, gender, weight, medical_condition))
+                mysql.commit()
+                msg = 'You have successfully registered !'
+                return redirect(url_for('Main'))
+            except Exception as e:
+                print("Error executing SQL statement:", e)
+                msg = 'An error occurred while registering. Please try again later.'
+        
+    return msg
+@app.route('/logout')
+def Logout():
+    if session.get('logged_in') and session['role'] == 'user':
+        return render_template('login.html')
+    else:
+        return redirect('/')
+
+@app.route('/register', methods =['GET', 'POST'])
+def register():
+    msg = ''
+    if request.method == 'POST': 
+        if 'username' in request.form and 'password' in request.form and 'email' in request.form and 'firstname' in request.form and 'lastname' in request.form and 'address' in request.form and 'role' in request.form:
+            username = request.form['username']
+            password = request.form['password']
+            pwd =  hashlib.md5(password.encode()).hexdigest()
+            email = request.form['email']
+            firstname = request.form['firstname']
+            lastname = request.form['lastname']
+            address = request.form['address']
+            role = request.form['role']
+            cursor = mysql.cursor()
+            cursor.execute('INSERT INTO accounts (username, password, email, firstname, lastname, address, role) VALUES (%s, %s, %s, %s, %s, %s, %s)', (username,pwd,email,firstname, lastname,address,role))
+            mysql.commit()
+            msg = 'You have successfully registered !'
+            return redirect(url_for('login'))
+    elif request.method == 'POST':
+        msg = 'Please fill out the form !'
+    return msg
+
+@app.route('/admin')
+def Admin():
+    cursor = mysql.cursor()
+    cursor.execute("SELECT * FROM facility")
+    data = cursor.fetchall()
+    cursor.close()
+
+    return render_template('admin.html', facility=data)
+
+@app.route('/insert', methods = ['POST'])
+def insert():
+    if request.method == "POST": 
+        flash("Data Inserted Successfully")
+        hname = request.form['hname']
+        hospital_type = request.form['hospital_type']
+        rating = request.form['rating']
+        working_hour = request.form['working_hour']
+        severity_levels=request.form['severity_levels']
+        cur = mysql.cursor()
+        cur.execute("INSERT INTO facility (hname, hospital_type, rating, working_hour,severity_levels) VALUES (%s, %s, %s, %s,%s)", (hname, hospital_type, rating, working_hour, severity_levels))
+        mysql.commit()
+        return redirect(url_for('Admin'))
+ 
+
+@app.route('/delete/<string:id_data>', methods = ['GET'])
+def delete(id_data):
+    flash("Record Has Been Deleted Successfully")
+    cur = mysql.cursor()
+    cur.execute("DELETE FROM facility WHERE id=%s", (id_data,))
+    mysql.commit()
+    return redirect(url_for('Admin'))
+
+@app.route('/update', methods= ['POST', 'GET'])
+def update():
+    if request.method == 'POST':
+        
+        flash("Data Inserted Successfully")
+        hname = request.form['hname']
+        hospital_type = request.form['hospital_type']
+        rating = request.form['rating']
+        working_hour = request.form['working_hour']
+        severity_levels = request.form['severity_levels']
+
+        cur = mysql.cursor()
+        cur.execute("""
+        UPDATE facility SET hname=%s, hospital_type=%s, rating=%s, working_hours=%s, severity_levels=%S
+        WHERE id=%s
+        """, (hname, hospital_type, rating, working_hour, severity_levels))
+        flash("Data Updated Successfully")
+        return redirect(url_for('Admin'))
+@app.route('/hospital_recommendation', methods=['POST'])
+def hospital_recommendation():
+    # Get the user's input
+    user_input = request.form['text']
+
+    # Connect to the database
+    cur = mysql.connection.cursor()
+
+    # Check if the user prefers private or public hospitals
+    if 'private' in user_input.lower():
+        hospital_type = 'private'
+        cur.execute("SELECT hname, rating, working_hour  FROM facility WHERE hospital_type='private' ORDER BY rating DESC", ('%breast cancer%', hospital_type))
+        results = cur.fetchall()
+        if len(results) == 0:
+            return 'Sorry, we could not find any private hospitals for breast cancer treatment.'
+        else:
+            response = 'Here are some private hospitals that we recommend for breast cancer treatment: '
+            for result in results:
+                response += f'{result[0]} - {result[1]}'
+            return response
+    elif 'public' in user_input.lower():
+        hospital_type = 'public'
+        cur.execute("SELECT hname, rating, working_hour  FROM facility WHERE hospital_type='public'  ORDER BY rating DESC", ('%breast cancer%', hospital_type))
+        results = cur.fetchall()
+        if len(results) == 0:
+            return 'Sorry, we could not find any public hospitals for breast cancer treatment.'
+        else:
+            response = 'Here are some public hospitals that we recommend for breast cancer treatment:\n'
+            for result in results:
+                response += f'{result[0]}\n'
+            return response
+            cur.close()
+    else:
+        return 'Sorry, I didn\'t understand your preference. Please try again.'
+
+def load_chat_history_from_file():
+    with open('chat_history.txt', 'r') as file:
+        chat_history = file.readlines()
+    return chat_history
+
+# In your Flask route function
+@app.route('/chat', methods=['POST'])
+def chat():
+    user_message = request.form['user_message']
+    bot_response = get_response(user_message)
+    save_message_to_file(user_message, bot_response)
+    chat_history = load_chat_history_from_file()
+    return render_template('index.html', chat_history=chat_history)
+  
+
 
 @app.route("/get")
 def chatbot():
     userText = request.args.get('msg')
-    resp=response(userText)
+    resp = response(userText)
     return resp
+
+
+
+
+
+
+
+
+# route for chatbot response
+
+
+
+
+
