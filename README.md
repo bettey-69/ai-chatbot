@@ -1,18 +1,15 @@
 # Ted, The Deep-Learning Chatbot
 
 ## About this Project
-Ted is a multipurpose chatbot made using Python3, who can chat with you and help in performing daily tasks. It uses NLP and Deep-Learning to analyse the user's message, classify it into the a broader category and then reply with a suitable message or the required information. It is hosted using flask and is available on heroku at the link specified above. 
+AI-EMPOWERD CHATBOTis a multipurpose chatbot made using Python who can chat with you and help in performing daily tasks. It uses NLP and Deep-Learning to analyse the user's message, classify it into the a broader category and then reply with a suitable message or the required information. It is hosted using flask and is available on heroku at the link specified above. 
 
-## Project UI
-Home Page:
 
-![image](https://raw.githubusercontent.com/Karan-Malik/Chatbot/master/UI/main_screen.PNG?token=AKGUW5C2TMM37OQE5FSPXLS66D55O)
 
 To run it locally on your system, follow these steps:
 1. Clone this repository onto your system. On Command Prompt, run the following command:
 
 ```
-git clone https://github.com/Karan-Malik/Chatbot.git
+git clone https://github.com/bettey-69/ai-chatbot.git
 ```
 2. Change your directory to Chatbot:
 ```
@@ -29,10 +26,4 @@ flask run
 ```
 
 5. Enter the url provided after running the previous commands into your web browser
-
-Ted is now ready to chat!
-
-#### I would like to thank [Ashutosh Varma](https://github.com/ashutoshvarma) and [Manorit Chawdhry](https://github.com/manorit2001) for their help and contribution to this project. Do check out their Github accounts!
-
-##### Copyright (c) 2020 Karan-Malik
 
